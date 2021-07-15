@@ -1,6 +1,7 @@
 class UserMailer < ApplicationMailer
   default from: "Feedbin <#{ENV["FROM_ADDRESS"]}>", skip_premailer: true
-  add_template_helper(ApplicationHelper)
+  include ApplicationHelper
+  helper ApplicationHelper
 
   def payment_receipt(billing_event)
     @billing_event = BillingEvent.find(billing_event)
@@ -38,12 +39,22 @@ class UserMailer < ApplicationMailer
 
   def kindle(kindle_address, mobi_file)
     attachments["kindle.mobi"] = File.read(mobi_file)
-    mail to: kindle_address, subject: "Kindle Content", body: "", from: ENV["KINDLE_EMAIL"]
+    mail to: kindle_address, subject: "Kindle Content", body: ".", from: ENV["KINDLE_EMAIL"]
+  end
+
+  def mailtest(user_id)
+    @user = User.find(user_id)
+    mail to: @user.email, subject: "[Feedbin] Starred Items Export Complete", body: ""
   end
 
   def account_closed(user_id, opml)
     @user = User.find(user_id)
     attachments["subscriptions.xml"] = opml
     mail to: @user.email, subject: "[Feedbin] Account Closed"
+  end
+
+  def twitter_connection_error(user_id)
+    @user = User.find(user_id)
+    mail to: @user.email, subject: "[Feedbin] Twitter Connection Error"
   end
 end

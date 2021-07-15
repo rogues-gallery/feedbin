@@ -1,34 +1,5 @@
-require "kramdown"
-require "rails_autolink"
-
 class ContentFormatter
-  LEADING_CHARS = %w|
-    (
-    [
-    {
-    @
-    #
-    '
-    "
-    $
-    “
-  |
-  TRAILING_CHARS = %w|
-    )
-    ]
-    }
-    :
-    ;
-    '
-    "
-    ?
-    .
-    ,
-    !
-    ”
-  |
-
-  WHITELIST_BASE = {}.tap do |hash|
+  ALLOWLIST_BASE = {}.tap do |hash|
     hash[:elements] = %w[
       h1 h2 h3 h4 h5 h6 h7 h8 br b i strong em a pre code img tt div ins del sup sub
       p ol ul table thead tbody tfoot blockquote dl dt dd kbd q samp var hr ruby rt
@@ -45,7 +16,7 @@ class ContentFormatter
       "ins" => ["cite"],
       "q" => ["cite"],
       "source" => ["src"],
-      "video" => ["src", "poster", "playsinline", "loop", "muted", "controls"],
+      "video" => ["src", "poster", "playsinline", "loop", "muted", "controls", "preload"],
       "audio" => ["src"],
       "td" => ["align"],
       "th" => ["align"],
@@ -58,70 +29,72 @@ class ContentFormatter
         open prompt readonly rel rev rows rowspan rules scope selected shape size span
         start summary tabindex target title type usemap valign value vspace width
         itemprop id
-      ],
+      ]
     }
 
     hash[:protocols] = {
       "a" => {
-        "href" => ["http", "https", "mailto", :relative],
+        "href" => ["http", "https", "mailto", :relative]
       },
       "blockquote" => {
-        "cite" => ["http", "https", :relative],
+        "cite" => ["http", "https", :relative]
       },
       "del" => {
-        "cite" => ["http", "https", :relative],
+        "cite" => ["http", "https", :relative]
       },
       "ins" => {
-        "cite" => ["http", "https", :relative],
+        "cite" => ["http", "https", :relative]
       },
       "q" => {
-        "cite" => ["http", "https", :relative],
+        "cite" => ["http", "https", :relative]
       },
       "img" => {
         "src" => ["http", "https", :relative, "data"],
-        "longdesc" => ["http", "https", :relative],
+        "longdesc" => ["http", "https", :relative]
       },
       "video" => {
         "src" => ["http", "https"],
-        "poster" => ["http", "https"],
+        "poster" => ["http", "https"]
       },
       "audio" => {
-        "src" => ["http", "https"],
-      },
+        "src" => ["http", "https"]
+      }
     }
 
     hash[:remove_contents] = %w[script style iframe object embed]
   end
 
-  WHITELIST_DEFAULT = WHITELIST_BASE.clone.tap do |hash|
+  ALLOWLIST_DEFAULT = ALLOWLIST_BASE.clone.tap do |hash|
     transformers = Transformers.new
-    hash[:transformers] = [transformers.class_whitelist, transformers.table_elements, transformers.top_level_li]
+    hash[:transformers] = [transformers.class_allowlist, transformers.table_elements, transformers.top_level_li, transformers.video]
   end
 
-  WHITELIST_NEWSLETTER = WHITELIST_BASE.clone.tap do |hash|
+  ALLOWLIST_NEWSLETTER = ALLOWLIST_BASE.clone.tap do |hash|
     hash[:elements] = hash[:elements] - %w[table thead tbody tfoot tr td]
   end
 
-  WHITELIST_EVERNOTE = {
+  ALLOWLIST_EVERNOTE = {
     elements: %w[
       a abbr acronym address area b bdo big blockquote br caption center cite code col colgroup dd
       del dfn div dl dt em font h1 h2 h3 h4 h5 h6 hr i img ins kbd li map ol p pre q s samp small
-      span strike strong sub sup table tbody td tfoot th thead title tr tt u ul var xmp
+      strike strong sub sup table tbody td tfoot th thead tr tt u ul var xmp
     ],
-    remove_contents: ["script", "style", "iframe", "object", "embed"],
+    remove_contents: ["script", "style", "iframe", "object", "embed", "title"],
     attributes: {
       "a" => ["href"],
       "img" => ["src"],
       :all => ["align", "alt", "border", "cellpadding", "cellspacing", "cite", "cols", "colspan", "color",
-               "coords", "datetime", "dir", "disabled", "enctype", "for", "height", "hreflang", "label", "lang",
-               "longdesc", "name", "rel", "rev", "rows", "rowspan", "selected", "shape", "size", "span", "start",
-               "summary", "target", "title", "type", "valign", "value", "vspace", "width",],
+        "coords", "datetime", "dir", "disabled", "enctype", "for", "height", "hreflang", "label", "lang",
+        "longdesc", "name", "rel", "rev", "rows", "rowspan", "selected", "shape", "size", "span", "start",
+        "summary", "target", "title", "type", "valign", "value", "vspace", "width"]
     },
     protocols: {
       "a" => {"href" => ["http", "https", :relative]},
-      "img" => {"src" => ["http", "https", :relative]},
-    },
+      "img" => {"src" => ["http", "https", :relative]}
+    }
   }
+
+  SANITIZE_BASIC = Sanitize::Config.merge(Sanitize::Config::BASIC, remove_contents: ["script", "style", "iframe", "object", "embed", "figure"])
 
   def self.format!(*args)
     new._format!(*args)
@@ -129,11 +102,11 @@ class ContentFormatter
 
   def _format!(content, entry = nil, image_proxy_enabled = true, base_url = nil)
     context = {
-      whitelist: WHITELIST_DEFAULT,
+      whitelist: ALLOWLIST_DEFAULT,
       embed_url: Rails.application.routes.url_helpers.iframe_embeds_path,
-      embed_classes: "iframe-placeholder entry-callout system-content",
+      embed_classes: "iframe-placeholder entry-callout system-content"
     }
-    filters = [HTML::Pipeline::SanitizationFilter, HTML::Pipeline::SrcFixer, HTML::Pipeline::IframeFilter]
+    filters = [HTML::Pipeline::SmileyFilter, HTML::Pipeline::SanitizationFilter, HTML::Pipeline::SrcFixer, HTML::Pipeline::IframeFilter]
 
     if ENV["CAMO_HOST"] && ENV["CAMO_KEY"] && image_proxy_enabled
       context[:asset_proxy] = ENV["CAMO_HOST"]
@@ -148,7 +121,7 @@ class ContentFormatter
       context[:image_base_url] = context[:href_base_url] = entry.url || entry.feed.site_url
       context[:image_subpage_url] = context[:href_subpage_url] = entry.url || ""
       if entry.feed.newsletter?
-        context[:whitelist] = WHITELIST_NEWSLETTER
+        context[:whitelist] = ALLOWLIST_NEWSLETTER
       end
     elsif base_url
       filters.unshift(HTML::Pipeline::AbsoluteSourceFilter)
@@ -163,7 +136,7 @@ class ContentFormatter
 
     result = pipeline.call(content)
 
-    if entry && entry.archived_images?
+    if entry&.archived_images?
       result[:output] = ImageFallback.new(result[:output]).add_fallbacks
     end
 
@@ -176,7 +149,7 @@ class ContentFormatter
 
   def _newsletter_format(content)
     context = {
-      whitelist: Sanitize::Config::RELAXED,
+      whitelist: Sanitize::Config::RELAXED
     }
     filters = [HTML::Pipeline::SanitizationFilter]
 
@@ -204,7 +177,7 @@ class ContentFormatter
       image_base_url: base_url || entry.feed.site_url,
       image_subpage_url: base_url || entry.url || "",
       href_base_url: base_url || entry.feed.site_url,
-      href_subpage_url: base_url || entry.url || "",
+      href_subpage_url: base_url || entry.url || ""
     }
     pipeline = HTML::Pipeline.new filters, context
     result = pipeline.call(content)
@@ -223,11 +196,11 @@ class ContentFormatter
       image_base_url: entry.feed.site_url,
       image_subpage_url: entry.url || "",
       href_base_url: entry.feed.site_url,
-      href_subpage_url: entry.url || "",
+      href_subpage_url: entry.url || ""
     }
     if entry.feed.newsletter?
       filters.push(HTML::Pipeline::SanitizationFilter)
-      context[:whitelist] = WHITELIST_NEWSLETTER
+      context[:whitelist] = ALLOWLIST_NEWSLETTER
     end
     pipeline = HTML::Pipeline.new filters, context
     result = pipeline.call(content)
@@ -248,7 +221,7 @@ class ContentFormatter
       href_base_url: entry.feed.site_url,
       href_subpage_url: entry.url || "",
       placeholder_url: "",
-      placeholder_attribute: "data-feedbin-src",
+      placeholder_attribute: "data-feedbin-src"
     }
     pipeline = HTML::Pipeline.new filters, context
     result = pipeline.call(content)
@@ -264,11 +237,11 @@ class ContentFormatter
   def _evernote_format(content, entry)
     filters = [HTML::Pipeline::SanitizationFilter, HTML::Pipeline::SrcFixer, HTML::Pipeline::AbsoluteSourceFilter, HTML::Pipeline::AbsoluteHrefFilter, HTML::Pipeline::ProtocolFilter]
     context = {
-      whitelist: WHITELIST_EVERNOTE,
+      whitelist: ALLOWLIST_EVERNOTE,
       image_base_url: entry.feed.site_url,
       image_subpage_url: entry.url || "",
       href_base_url: entry.feed.site_url,
-      href_subpage_url: entry.url || "",
+      href_subpage_url: entry.url || ""
     }
 
     pipeline = HTML::Pipeline.new filters, context
@@ -283,32 +256,15 @@ class ContentFormatter
   end
 
   def _summary(text, length = nil)
-    decoder = HTMLEntities.new
-    text = decoder.decode(text)
-    text = text.chars.select(&:valid_encoding?).join
+    text = Loofah.fragment(text)
+      .scrub!(:prune)
+      .to_text(encode_special_chars: false)
+      .gsub(/\s+/, " ")
+      .squish
 
-    sanitize_config = Sanitize::Config::BASIC.dup
-    sanitize_config = sanitize_config.merge(remove_contents: ["script", "style", "iframe", "object", "embed", "figure"])
-    text = Sanitize.fragment(text, sanitize_config)
-
-    text = Nokogiri::HTML(text)
-    text = text.search("//text()").map(&:text).join(" ").squish
-
-    TRAILING_CHARS.each do |char|
-      text = text.gsub(" #{char}", char.to_s)
-    end
-
-    LEADING_CHARS.each do |char|
-      text = text.gsub("#{char} ", char.to_s)
-    end
-
-    if length
-      text = text.truncate(length, separator: " ", omission: "")
-    end
+    text = text.truncate(length, separator: " ", omission: "") if length
 
     text
-  rescue
-    nil
   end
 
   def self.text_email(*args)
@@ -316,8 +272,9 @@ class ContentFormatter
   end
 
   def _text_email(content)
-    content = Kramdown::Document.new(content).to_html
-    ActionController::Base.helpers.auto_link(content)
+    markdown = Redcarpet::Markdown.new(Redcarpet::Render::HTML.new(hard_wrap: true), autolink: true)
+    content = markdown.render(content)
+    Sanitize.fragment(content, ALLOWLIST_DEFAULT).html_safe
   rescue
     content
   end

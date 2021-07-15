@@ -2,7 +2,7 @@ var callback = function() {
     <% if @entries.length == 0 %>
         var entries = "<%= j render partial: "entries/no_entry" %>";
     <% else %>
-        var entries = "<%= j render partial: "entries/entry", collection: @entries, cached: true %>";
+        var entries = "<%= j render partial: "entries/entry", collection: @entries, cached: -> (entry) { [entry, entry.feed.custom_icon, entry.feed.favicon, "v2"] } %>";
     <% end %>
 
     <% if @append %>
@@ -30,12 +30,21 @@ var callback = function() {
 
     feedbin.formatEntries()
     feedbin.preloadEntries(<%= @entries.map{ |entry| entry.id }.to_json.html_safe %>, <%= @force_preload ? "true" : "false" %>);
-    feedbin.viewType = "<%= @type %>";
     feedbin.markReadData.date = "<%= j last_unread_date %>";
+    <% if @type %>
+    feedbin.viewType = "<%= @type %>";
+    <% else %>
+    feedbin.viewType = null;
+    <% end %>
+
+    try {
+      feedbin.loadMore();
+    } catch (e) {
+    }
 }
 
 if (feedbin.panelScrollComplete) {
-    callback();
+  callback();
 } else {
     var interval = setInterval(function() {
         if (feedbin.panelScrollComplete) {

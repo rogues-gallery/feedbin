@@ -19,19 +19,74 @@ class ApplicationController < ActionController::Base
     payload[:request_start] = request.headers["X-Request-Start"]
   end
 
-  def update_selected_feed!(type, data = nil)
-    if data.nil?
-      selected_feed = type
-    else
-      session[:selected_feed_data] = data
-      selected_feed = "#{type}_#{data}"
+  def render_404
+    respond_to do |format|
+      format.any do
+        render "errors/not_found", formats: :html, layout: nil, status: :not_found, content_type: "text/html"
+      end
     end
-    session[:selected_feed_type] = type
-    session[:selected_feed] = selected_feed
   end
 
-  def render_404
-    render "errors/not_found", status: 404, layout: "application", formats: [:html]
+  def logged_in
+    clear_location
+    get_feeds_list
+    subscriptions = @user.subscriptions
+
+    user_titles = subscriptions.each_with_object({}) { |subscription, hash|
+      if subscription.title.present?
+        hash[subscription.feed_id] = ERB::Util.html_escape_once(subscription.title)
+      end
+    }
+
+    readability_settings = {}
+    subscription_view_settings = {}
+    subscriptions.each do |subscription|
+      readability_settings[subscription.feed_id] = subscription.view_inline
+      subscription_view_settings[subscription.feed_id] = subscription.view_mode
+    end
+
+    @now_playing = Entry.where(id: @user.now_playing_entry).first
+    @recently_played = @user.recently_played_entries.where(entry_id: @user.now_playing_entry).first
+
+    @show_welcome = subscriptions.present? ? false : true
+    @update_ids = @user.subscriptions.where(show_updates: false).pluck(:feed_id).map { |feed_id| ".entry-feed-#{feed_id} .diff-wrap" }.join(", ")
+    @data = {
+      login_url: login_url,
+      tags_path: tags_path(format: :json),
+      user_titles: user_titles,
+      preload_entries_path: preload_entries_path(format: :json),
+      sticky_readability: @user.setting_on?(:sticky_view_inline),
+      readability_settings: readability_settings,
+      show_unread_count: @user.setting_on?(:show_unread_count),
+      precache_images: @user.setting_on?(:precache_images),
+      auto_update_path: auto_update_feeds_path,
+      font_sizes: Feedbin::Application.config.font_sizes,
+      mark_as_read_path: mark_all_as_read_entries_path,
+      mark_as_read_confirmation: @user.setting_on?(:mark_as_read_confirmation),
+      mark_direction_as_read_entries: mark_direction_as_read_entries_path,
+      entry_sort: @user.entry_sort,
+      update_message_seen: @user.setting_on?(:update_message_seen),
+      feed_order: @user.feed_order,
+      refresh_sessions_path: refresh_sessions_path,
+      audio_panel_size: @user.audio_panel_size,
+      view_links_in_app: @user.setting_on?(:view_links_in_app),
+      saved_searches_count_path: count_saved_searches_path,
+      proxy_images: !@user.setting_on?(:disable_image_proxy),
+      twitter_embed_path: twitter_embeds_path,
+      instagram_embed_path: instagram_embeds_path,
+      favicon_colors: @user.setting_on?(:favicon_colors),
+      font_stylesheet: ENV["FONT_STYLESHEET"],
+      modal_extracts_path: modal_extracts_path,
+      progress: @user.recently_played_entries_progress,
+      subscription_view_mode: subscription_view_settings,
+      pages_internal_path: pages_internal_path,
+      tag_visibility: @user.tag_visibility,
+      visibility_key: "tag_visibility",
+      sharing: @user.combined_sharing_services,
+      sharing_path: sharing_services_path
+    }
+
+    render "site/logged_in"
   end
 
   def get_collections
@@ -46,7 +101,7 @@ class ApplicationController < ActionController::Base
       favicon_alt_class: "favicon-unread-active",
       parent_class: "collection-unread",
       parent_data: {behavior: "all_unread", feed_id: "collection_unread", count_type: "unread"},
-      data: {behavior: "selectable show_entries open_item feed_link", mark_read: {type: "unread", message: "Mark all items as read?"}.to_json},
+      data: {behavior: "selectable show_entries open_item feed_link", mark_read: {type: "unread", message: "Mark all items as read?"}.to_json}
     }
     collections << {
       title: "All",
@@ -56,7 +111,7 @@ class ApplicationController < ActionController::Base
       favicon_class: "favicon-all",
       parent_class: "collection-all",
       parent_data: {behavior: "all_unread", feed_id: "collection_all", count_type: "unread"},
-      data: {behavior: "selectable show_entries open_item feed_link", mark_read: {type: "all", message: "Mark all items as read?"}.to_json},
+      data: {behavior: "selectable show_entries open_item feed_link", mark_read: {type: "all", message: "Mark all items as read?"}.to_json}
     }
     collections << {
       title: "Starred",
@@ -66,7 +121,7 @@ class ApplicationController < ActionController::Base
       favicon_class: "favicon-star",
       parent_class: "collection-starred",
       parent_data: {behavior: "starred", feed_id: "collection_starred", count_type: "starred"},
-      data: {behavior: "selectable show_entries open_item feed_link", mark_read: {type: "starred", message: "Mark starred items as read?"}.to_json},
+      data: {behavior: "selectable show_entries open_item feed_link", mark_read: {type: "starred", message: "Mark starred items as read?"}.to_json}
     }
     unless user.setting_on?(:hide_recently_read)
       collections << {
@@ -78,7 +133,7 @@ class ApplicationController < ActionController::Base
         parent_class: "collection-recently-read",
         parent_data: {behavior: "recently_read", feed_id: "collection_recently_read", count_type: "recently_read"},
         data: {behavior: "selectable show_entries open_item feed_link", mark_read: {type: "recently_read", message: "Mark recently read items as read?"}.to_json},
-        clear: {path: destroy_all_recently_read_entries_path, message: "Clear all recently read?" }
+        clear: {path: destroy_all_recently_read_entries_path, message: "Clear all recently read?"}
       }
     end
     unless user.setting_on?(:hide_updated)
@@ -90,7 +145,7 @@ class ApplicationController < ActionController::Base
         favicon_class: "favicon-updated",
         parent_class: "collection-updated",
         parent_data: {behavior: "updated", feed_id: "collection_updated", count_type: "updated"},
-        data: {behavior: "selectable show_entries open_item feed_link", special_collection: "updated", mark_read: {type: "updated", message: "Mark updated items as read?"}.to_json},
+        data: {behavior: "selectable show_entries open_item feed_link", special_collection: "updated", mark_read: {type: "updated", message: "Mark updated items as read?"}.to_json}
       }
     end
     unless user.setting_on?(:hide_recently_played)
@@ -110,10 +165,6 @@ class ApplicationController < ActionController::Base
   end
 
   def get_feeds_list
-    if @mark_selected.nil?
-      @mark_selected = true
-    end
-
     @user = current_user
     @page_feed = @user.feeds.pages.first
 
@@ -127,7 +178,7 @@ class ApplicationController < ActionController::Base
       updated_entries: @user.updated_entries.pluck("feed_id, entry_id").each_slice(10_000).to_a,
       tag_map: @user.taggings.build_tag_map,
       feed_map: @user.taggings.build_feed_map,
-      entry_sort: @user.entry_sort,
+      entry_sort: @user.entry_sort
     }
     @feed_data = {
       feeds: @feeds,
@@ -136,7 +187,7 @@ class ApplicationController < ActionController::Base
       tags: @user.tag_group,
       saved_searches: @user.saved_searches.order(Arel.sql("lower(name)")),
       count_data: @count_data,
-      feed_order: @user.feed_order,
+      feed_order: @user.feed_order
     }
   end
 
@@ -150,6 +201,10 @@ class ApplicationController < ActionController::Base
 
   def set_csrf_cookie
     cookies["XSRF-TOKEN"] = form_authenticity_token if protect_against_forgery?
+  end
+
+  def native?
+    request.user_agent&.include?("TurbolinksFeedbin")
   end
 
   protected
@@ -191,5 +246,4 @@ class ApplicationController < ActionController::Base
     verifier = ActiveSupport::MessageVerifier.new(Rails.application.secrets.secret_key_base)
     verifier.verify(authentication_token)
   end
-
 end

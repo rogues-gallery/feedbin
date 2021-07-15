@@ -11,22 +11,14 @@ Bundler.require(*Rails.groups)
 module Feedbin
   class Application < Rails::Application
     # Initialize configuration defaults for originally generated Rails version.
-    config.load_defaults 6.0
+    config.load_defaults 6.1
 
     # Settings in config/environments/* take precedence over those specified here.
     # Application configuration should go into files in config/initializers
     # -- all .rb files in that directory are automatically loaded.
-
-    config.action_mailer.delivery_method = :smtp
-    config.action_mailer.smtp_settings = {
-      address: ENV["SMTP_ADDRESS"],
-      port: 587,
-      enable_starttls_auto: true,
-      authentication: "login",
-      user_name: ENV["SMTP_USERNAME"],
-      password: ENV["SMTP_PASSWORD"],
-      domain: ENV["SMTP_DOMAIN"] || ENV["DEFAULT_URL_OPTIONS_HOST"],
-    }
+    config.action_mailer.delivery_method   = :postmark
+    config.action_mailer.postmark_settings = { api_token: ENV["POSTMARK_API_KEY"] }
+    config.action_mailer.default_options   = { from: ENV["FROM_ADDRESS"] }
 
     config.action_view.sanitized_allowed_tags = "table", "tr", "td", "th", "thead", "tbody"
 
@@ -45,5 +37,7 @@ module Feedbin
     config.sass.line_comments = true
     config.assets.compress = true
     config.action_view.automatically_disable_submit_tag = false
+    config.active_record.belongs_to_required_by_default = false
+    config.action_view.default_enforce_utf8 = true
   end
 end

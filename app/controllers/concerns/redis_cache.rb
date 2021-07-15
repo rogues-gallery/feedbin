@@ -4,7 +4,7 @@ module RedisCache
   def get_cached_entry_ids(cache_key, feed_key, since = "-inf", read = nil, starred = nil)
     key_exists, entry_ids = $redis[:entries].with { |redis|
       redis.multi do
-        redis.exists(cache_key)
+        redis.exists?(cache_key)
         redis.lrange(cache_key, 0, -1)
       end
     }
@@ -64,9 +64,9 @@ module RedisCache
     end
 
     options[:paged_entry_ids] = entry_ids.each_slice(options[:per_page]).to_a
-    options[:will_paginate] = WillPaginate::Collection.create(options[:page], options[:per_page], entry_ids.length) do |pager|
+    options[:will_paginate] = WillPaginate::Collection.create(options[:page], options[:per_page], entry_ids.length) { |pager|
       pager.replace(entry_ids)
-    end
+    }
     options[:page_index] = options[:page] - 1
     options
   end

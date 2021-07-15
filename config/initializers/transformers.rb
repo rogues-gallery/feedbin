@@ -4,12 +4,13 @@ class Transformers
   TABLE_ITEMS = Set.new(%w[tr td th].freeze)
   TABLE = "table".freeze
   TABLE_SECTIONS = Set.new(%w[thead tbody tfoot].freeze)
+  VIDEO = "video".freeze
 
-  def class_whitelist
+  def class_allowlist
     lambda do |env|
       node = env[:node]
 
-      if env[:node_name] != "blockquote" || env[:is_whitelisted] || !node.element? || node["class"].nil?
+      if env[:node_name] != "blockquote" || env[:is_allowlisted] || !node.element? || node["class"].nil?
         return
       end
 
@@ -26,7 +27,7 @@ class Transformers
 
       Sanitize.node!(node, Sanitize::Config.merge(Sanitize::Config::BASIC, attributes: {"blockquote" => allowed_attributes}))
 
-      {node_whitelist: [node]}
+      {node_allowlist: [node]}
     end
   end
 
@@ -47,6 +48,15 @@ class Transformers
       name, node = env[:node_name], env[:node]
       if (TABLE_SECTIONS.include?(name) || TABLE_ITEMS.include?(name)) && !node.ancestors.any? { |n| n.name == TABLE }
         node.replace(node.children)
+      end
+    end
+  end
+
+  def video
+    lambda do |env|
+      name, node = env[:node_name], env[:node]
+      if name == VIDEO
+        node["preload"] = "none"
       end
     end
   end

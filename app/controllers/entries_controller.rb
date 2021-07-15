@@ -4,7 +4,6 @@ class EntriesController < ApplicationController
 
   def index
     @user = current_user
-    update_selected_feed!("collection_all")
 
     feed_ids = @user.subscriptions.pluck(:feed_id)
     entry_id_cache = EntryIdCache.new(@user.id, feed_ids)
@@ -26,19 +25,13 @@ class EntriesController < ApplicationController
 
   def unread
     @user = current_user
-    update_selected_feed!("collection_unread")
 
     unread_entries = @user.unread_entries.select(:entry_id).page(params[:page]).sort_preference(@user.entry_sort)
     @entries = Entry.entries_with_feed(unread_entries, @user.entry_sort).entries_list
 
     @page_query = unread_entries
-
     @append = params[:page].present?
-
     @all_unread = "true"
-    @type = "unread"
-    @data = nil
-
     @collection_title = "Unread"
 
     respond_to do |format|
@@ -48,18 +41,12 @@ class EntriesController < ApplicationController
 
   def starred
     @user = current_user
-    update_selected_feed!("collection_starred")
 
     starred_entries = @user.starred_entries.select(:entry_id).page(params[:page]).order("published DESC")
     @entries = Entry.entries_with_feed(starred_entries, "published DESC").entries_list
 
     @page_query = starred_entries
-
     @append = params[:page].present?
-
-    @type = "starred"
-    @data = nil
-
     @collection_title = "Starred"
 
     respond_to do |format|
@@ -69,15 +56,26 @@ class EntriesController < ApplicationController
 
   def show
     @user = current_user
-    @entries = entries_by_id(params[:id])
-    respond_to do |format|
-      format.js
+    ids = @user.can_read_filter([params[:id].to_i])
+    if ids.present?
+      @entries = entries_by_id(ids)
+      UnreadEntry.where(user: @user, entry_id: params[:id]).delete_all
+      UpdatedEntry.where(user: @user, entry_id: params[:id]).delete_all
+      respond_to do |format|
+        format.js
+        format.html do
+          logged_in
+        end
+      end
+    else
+      render_404
     end
   end
 
   def preload
     @user = current_user
     ids = params[:ids].split(",").map { |i| i.to_i }
+    ids = @user.can_read_filter(ids)
     ViewLinkCacheMultiple.perform_async(@user.id, ids)
     entries = entries_by_id(ids)
     render json: entries.to_json
@@ -139,8 +137,6 @@ class EntriesController < ApplicationController
       UnreadEntry.where(user_id: @user.id, entry_id: ids).delete_all
     end
 
-    @mark_selected = true
-
     get_feeds_list if @full_update
 
     respond_to do |format|
@@ -190,7 +186,6 @@ class EntriesController < ApplicationController
     entry_ids = unread_entries.map(&:entry_id)
     unread_entries.delete_all
 
-    @mark_selected = true
     get_feeds_list
 
     respond_to do |format|
@@ -202,6 +197,7 @@ class EntriesController < ApplicationController
     @user = current_user
     @escaped_query = params[:query].tr("\"", "'").html_safe if params[:query]
 
+    @saved_search_path = new_saved_search_path(query: params[:query])
     @entries = Entry.scoped_search(params, @user)
     @page_query = @entries
     @total_results = @entries.total
@@ -215,7 +211,6 @@ class EntriesController < ApplicationController
 
     @search_message = "Mark #{helpers.number_with_delimiter(@total_results)} #{"article".pluralize(@total_results)} that #{"match".pluralize(@total_results == 1 ? 2 : 1)} the search “#{@escaped_query}” as read?"
 
-    @saved_search_path = new_saved_search_path(query: params[:query])
 
     @collection_title = "Search"
 
@@ -228,10 +223,9 @@ class EntriesController < ApplicationController
 
   def push_view
     user_id = verify_push_token(params[:user])
-    @user = User.find(user_id)
-    @entry = Entry.find(params[:id])
-    UnreadEntry.where(user: @user, entry: @entry).delete_all
-    redirect_to @entry.fully_qualified_url, status: :found
+    user = User.find(user_id)
+    entry = Entry.find(params[:id])
+    redirect_to entry_url(entry), status: :found
   end
 
   def newsletter
@@ -256,33 +250,20 @@ class EntriesController < ApplicationController
   def entries_by_id(entry_ids)
     entries = Entry.where(id: entry_ids).includes(feed: [:favicon])
     subscriptions = @user.subscriptions.pluck(:feed_id)
+    @title = entries.present? ? "#{entries.first.title} - Feedbin" : "Feedbin"
     entries.each_with_object({}) do |entry, hash|
       locals = {
         entry: entry,
-        services: sharing_services(entry),
         extract: false,
         user: @user,
-        subscriptions: subscriptions,
+        subscriptions: subscriptions
       }
       hash[entry.id] = {
         content: render_to_string(partial: "entries/show", formats: [:html], locals: locals),
         inner_content: render_to_string(partial: "entries/inner_content", formats: [:html], locals: locals),
-        feed_id: entry.feed_id,
+        feed_id: entry.feed_id
       }
     end
-  end
-
-  def sharing_services(entry)
-    @user_sharing_services ||= begin
-      (@user.sharing_services + @user.supported_sharing_services).reject { |sharing_service| sharing_service.active? == false }.sort_by { |sharing_service| sharing_service.label }
-    end
-
-    services = []
-    @user_sharing_services.each do |sharing_service|
-      services << sharing_service.link_options(entry)
-    rescue
-    end
-    services
   end
 
   def matched_search_ids(params)
@@ -299,17 +280,5 @@ class EntriesController < ApplicationController
       end
     end
     ids
-  end
-
-  def check_for_image(entry, url)
-    response = HTTParty.head(url)
-    if /^image\//.match?(response.headers["content-type"])
-      content = "<img src='#{url}' />"
-      Librato.increment "readability.image_found"
-    else
-      content = nil
-      Librato.increment "readability.parse_fail"
-    end
-    content
   end
 end

@@ -54,7 +54,7 @@ class SavePage
       site_url: URI::HTTP.build(host: ENV["PAGES_DOMAIN"]).to_s,
       protected: true,
       host: ENV["PAGES_DOMAIN"],
-      feed_type: :pages,
+      feed_type: :pages
     }
   end
 
@@ -66,8 +66,8 @@ class SavePage
       url: url,
       published: parsed_result&.published || Time.now,
       public_id: public_id,
-      skip_recent_post_check: true
+      skip_recent_post_check: true,
+      data: TweetPage.tweet(url, user)
     }
   end
-
 end

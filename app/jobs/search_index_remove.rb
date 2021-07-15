@@ -9,8 +9,14 @@ class SearchIndexRemove
       client.bulk(
         index: Entry.index_name,
         type: Entry.document_type,
-        body: data,
+        body: data
       )
     end
+    # Sidekiq::Client.push(
+    #   "args" => [ids],
+    #   "class" => "SearchIndexRemoveAlt",
+    #   "queue" => "worker_slow_search_alt",
+    #   "retry" => false
+    # )
   end
 end

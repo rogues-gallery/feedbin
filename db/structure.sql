@@ -39,7 +39,7 @@ COMMENT ON EXTENSION pg_stat_statements IS 'track execution statistics of all SQ
 
 SET default_tablespace = '';
 
-SET default_with_oids = false;
+SET default_table_access_method = heap;
 
 --
 -- Name: actions; Type: TABLE; Schema: public; Owner: -
@@ -267,6 +267,40 @@ ALTER SEQUENCE public.devices_id_seq OWNED BY public.devices.id;
 
 
 --
+-- Name: embeds; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.embeds (
+    id bigint NOT NULL,
+    provider_id text NOT NULL,
+    parent_id text,
+    source integer NOT NULL,
+    data jsonb NOT NULL,
+    created_at timestamp(6) without time zone NOT NULL,
+    updated_at timestamp(6) without time zone NOT NULL
+);
+
+
+--
+-- Name: embeds_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.embeds_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: embeds_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.embeds_id_seq OWNED BY public.embeds.id;
+
+
+--
 -- Name: entries; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -294,7 +328,8 @@ CREATE TABLE public.entries (
     image json,
     recently_played_entries_count bigint DEFAULT 0,
     thread_id bigint,
-    settings jsonb
+    settings jsonb,
+    main_tweet_id text
 );
 
 
@@ -405,7 +440,9 @@ CREATE TABLE public.feeds (
     self_url text,
     feed_type bigint DEFAULT 0,
     active boolean DEFAULT true,
-    options json
+    options json,
+    hubs text[],
+    settings jsonb
 );
 
 
@@ -980,6 +1017,38 @@ ALTER SEQUENCE public.tags_id_seq OWNED BY public.tags.id;
 
 
 --
+-- Name: twitter_users; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.twitter_users (
+    id bigint NOT NULL,
+    screen_name text NOT NULL,
+    data jsonb NOT NULL,
+    created_at timestamp(6) without time zone NOT NULL,
+    updated_at timestamp(6) without time zone NOT NULL
+);
+
+
+--
+-- Name: twitter_users_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.twitter_users_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: twitter_users_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.twitter_users_id_seq OWNED BY public.twitter_users.id;
+
+
+--
 -- Name: unreads; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1074,7 +1143,8 @@ CREATE TABLE public.users (
     expires_at timestamp without time zone,
     newsletter_token character varying,
     price_tier bigint,
-    page_token character varying
+    page_token character varying,
+    twitter_auth_failures bigint
 );
 
 
@@ -1137,6 +1207,13 @@ ALTER TABLE ONLY public.deleted_users ALTER COLUMN id SET DEFAULT nextval('publi
 --
 
 ALTER TABLE ONLY public.devices ALTER COLUMN id SET DEFAULT nextval('public.devices_id_seq'::regclass);
+
+
+--
+-- Name: embeds id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.embeds ALTER COLUMN id SET DEFAULT nextval('public.embeds_id_seq'::regclass);
 
 
 --
@@ -1280,6 +1357,13 @@ ALTER TABLE ONLY public.tags ALTER COLUMN id SET DEFAULT nextval('public.tags_id
 
 
 --
+-- Name: twitter_users id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.twitter_users ALTER COLUMN id SET DEFAULT nextval('public.twitter_users_id_seq'::regclass);
+
+
+--
 -- Name: unreads id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -1354,6 +1438,14 @@ ALTER TABLE ONLY public.deleted_users
 
 ALTER TABLE ONLY public.devices
     ADD CONSTRAINT devices_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: embeds embeds_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.embeds
+    ADD CONSTRAINT embeds_pkey PRIMARY KEY (id);
 
 
 --
@@ -1517,6 +1609,14 @@ ALTER TABLE ONLY public.tags
 
 
 --
+-- Name: twitter_users twitter_users_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.twitter_users
+    ADD CONSTRAINT twitter_users_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: unreads unreads_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1611,10 +1711,31 @@ CREATE INDEX index_devices_on_user_id ON public.devices USING btree (user_id);
 
 
 --
+-- Name: index_embeds_on_parent_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_embeds_on_parent_id ON public.embeds USING btree (parent_id);
+
+
+--
+-- Name: index_embeds_on_source_and_provider_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_embeds_on_source_and_provider_id ON public.embeds USING btree (source, provider_id);
+
+
+--
 -- Name: index_entries_on_feed_id; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX index_entries_on_feed_id ON public.entries USING btree (feed_id);
+
+
+--
+-- Name: index_entries_on_main_tweet_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_entries_on_main_tweet_id ON public.entries USING btree (main_tweet_id) WHERE (main_tweet_id IS NOT NULL);
 
 
 --
@@ -1681,10 +1802,24 @@ CREATE INDEX index_feeds_on_host ON public.feeds USING btree (host);
 
 
 --
+-- Name: index_feeds_on_hubs; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_feeds_on_hubs ON public.feeds USING btree (hubs) WHERE (hubs IS NOT NULL);
+
+
+--
 -- Name: index_feeds_on_last_published_entry; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX index_feeds_on_last_published_entry ON public.feeds USING btree (last_published_entry);
+
+
+--
+-- Name: index_feeds_on_push_expiration; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_feeds_on_push_expiration ON public.feeds USING btree (push_expiration) WHERE (push_expiration IS NOT NULL);
 
 
 --
@@ -1968,6 +2103,13 @@ CREATE INDEX index_tags_on_name ON public.tags USING btree (name);
 
 
 --
+-- Name: index_twitter_users_on_lower_screen_name; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_twitter_users_on_lower_screen_name ON public.twitter_users USING btree (lower(screen_name));
+
+
+--
 -- Name: index_unreads_on_entry_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2105,6 +2247,13 @@ CREATE UNIQUE INDEX index_users_on_password_reset_token ON public.users USING bt
 --
 
 CREATE UNIQUE INDEX index_users_on_starred_token ON public.users USING btree (starred_token);
+
+
+--
+-- Name: index_users_on_twitter_auth_failures; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_users_on_twitter_auth_failures ON public.users USING btree (twitter_auth_failures);
 
 
 --
@@ -2296,6 +2445,12 @@ INSERT INTO "schema_migrations" (version) VALUES
 ('20200103141053'),
 ('20200109204853'),
 ('20200110142059'),
-('20200113101112');
+('20200113101112'),
+('20200708130351'),
+('20200730134217'),
+('20200810160825'),
+('20201230004844'),
+('20210102005228'),
+('20210601200027');
 
 

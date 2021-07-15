@@ -14,11 +14,10 @@ class Share::Buffer < Share::Service
     {text: "feedbin.sharePopup('#{uri}'); return false;"}
   end
 
-  def link_options(entry)
-    action = share(nil, entry)
-    defaults = super
-    defaults.merge({
-      html_options: {onclick: action[:text]},
+  def share_link
+    super.merge({
+      url: "#{URL}?url=${url}&text=${title}",
+      html_options: {"data-behavior" => "share_popup"}
     })
   end
 end

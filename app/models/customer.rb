@@ -10,7 +10,7 @@ class Customer
     Stripe::Subscription.create(
       customer: new_customer.id,
       plan: plan,
-      trial_end: trial_end.to_i,
+      trial_end: trial_end.to_i
     )
     new_customer
   end
@@ -29,11 +29,16 @@ class Customer
 
   def reopen_account
     invoice = Stripe::Invoice.list(customer: id, limit: 1).first
-    if !invoice.paid && invoice.closed
+    if !invoice.paid && invoice.closed && invoice.status != "draft"
       invoice.closed = false
       invoice.save
-    elsif !invoice.paid && invoice.attempt_count >= 4
-      invoice.pay
+    elsif (!invoice.paid && invoice.attempt_count >= 4) || invoice.status == "draft"
+      Stripe::Subscription.update(invoice.subscription,
+        {
+          billing_cycle_anchor: "now",
+          proration_behavior: "none"
+        }
+      )
     end
   end
 

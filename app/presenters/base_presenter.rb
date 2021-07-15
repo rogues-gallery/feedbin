@@ -26,12 +26,12 @@ class BasePresenter
       elsif feed.pages? && entry
         icon = Favicon.find_by_host(entry.hostname)
         icon_url = icon&.cdn_url
-        if icon_url
-          content = @template.content_tag :span, "", class: "favicon-wrap" do
+        content = if icon_url
+          @template.content_tag :span, "", class: "favicon-wrap" do
             @template.image_tag(icon_url, alt: "Favicon")
           end
         else
-          content = @template.content_tag :span, "", class: "favicon-wrap collection-favicon" do
+          @template.content_tag :span, "", class: "favicon-wrap collection-favicon" do
             @template.svg_tag("favicon-saved", size: "14x16")
           end
         end
@@ -40,12 +40,13 @@ class BasePresenter
           @template.svg_tag("favicon-saved", size: "14x16")
         end
       else
-        markup = <<-eos
-          <span class="favicon favicon-default favicon-character-#{feed.host_letter}" data-color-hash-seed="#{feed.host}"></span>
-        eos
+        variant = ["favicon-mask", "favicon-mask-alt"]
+        markup = @template.content_tag :span, class: "favicon-default #{variant[feed.id % 2]}", data: { color_hash_seed: feed.host || feed.title } do
+          @template.content_tag :span, "", class: "favicon-inner"
+        end
         if feed.favicon&.cdn_url
           markup = <<-eos
-            <span class="favicon" style="background-image: url(#{feed.favicon.cdn_url});"></span>
+            <span class="favicon #{feed.favicon.host_class}" style="background-image: url(#{feed.favicon.cdn_url});"></span>
           eos
         end
         content = <<-eos

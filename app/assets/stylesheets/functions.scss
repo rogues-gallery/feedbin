@@ -21,8 +21,19 @@
     #{$property}: $result;
 }
 
+@mixin ellipse {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 @mixin font-size($size-in-pixels) {
     @include size-in-rems(font-size, $size-in-pixels);
+}
+
+@function base-units($units) {
+    $base: 8;
+    @return $base * $units * 1px;
 }
 
 @mixin respond-to($media) {

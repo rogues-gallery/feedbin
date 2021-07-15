@@ -13,14 +13,14 @@ class TwitterFeedRefresher
     if keys.present?
       args = {
         "args" => [feed.id, feed.feed_url, keys],
-        "class" => "TwitterFeedRefresherCritical",
-        "queue" => "feed_refresher_fetcher_critical",
-        "retry" => false,
-        "at" => Time.now.to_i + rand(0..6.minutes.to_i),
+        "class" => "TwitterRefresher",
+        "queue" => "twitter_refresher",
+        "retry" => false
       }
 
       if user
-        args.delete("at")
+        args["class"] = "TwitterRefresherCritical"
+        args["queue"] = "twitter_refresher_critical"
       end
 
       Sidekiq::Client.push(args)
@@ -31,7 +31,7 @@ class TwitterFeedRefresher
     user_ids = if user
       [user.id]
     else
-      feed.subscriptions.where(active: true, muted: false).pluck(:user_id)
+      feed.subscriptions.where(active: true).pluck(:user_id)
     end
 
     users = User.where(id: user_ids)
@@ -44,7 +44,7 @@ class TwitterFeedRefresher
       if user.twitter_access_token.present? && user.twitter_access_secret.present? && user_matches
         {
           twitter_access_token: user.twitter_access_token,
-          twitter_access_secret: user.twitter_access_secret,
+          twitter_access_secret: user.twitter_access_secret
         }
       end
     }.compact

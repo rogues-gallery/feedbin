@@ -23,7 +23,7 @@ module BatchJobs
       defaults = {
         "class" => sidekiq_class.name.freeze,
         "queue" => sidekiq_class.get_sidekiq_options["queue"].to_s.freeze,
-        "retry" => sidekiq_class.get_sidekiq_options["retry"].freeze,
+        "retry" => sidekiq_class.get_sidekiq_options["retry"].freeze
       }
       (1..last_id).each_slice(10_000) do |slice|
         ids = slice.map { |id| [id, *args] }
@@ -32,5 +32,29 @@ module BatchJobs
         )
       end
     end
+  end
+
+  def add_to_queue(queue, id)
+    Sidekiq.redis { |redis| redis.sadd(queue, id) }
+  end
+
+  def dequeue_ids(queue)
+    temporary_set = "#{self.class.name}-#{jid}"
+
+    (_, _, ids) = Sidekiq.redis do |redis|
+      redis.pipelined do
+        redis.renamenx(queue, temporary_set)
+        redis.expire(temporary_set, 60)
+        redis.smembers(temporary_set)
+      end
+    end
+
+    ids
+  rescue Redis::CommandError => exception
+    if exception.message =~ /no such key/i
+      logger.info("Nothing to do")
+      return nil
+    end
+    raise
   end
 end

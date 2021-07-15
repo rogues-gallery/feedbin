@@ -13,13 +13,21 @@ class SafariPushNotificationSend
     entry = Entry.find(entry_id)
     feed = entry.feed
 
-    body = entry.title || entry.summary
+    if entry.tweet?
+      body = entry.main_tweet.full_text
+      title = format_text(entry.main_tweet.user.name, 36)
+      titles = {}
+    else
+      body = entry.title || entry.summary
+      title = format_text(feed.title, 36)
+      titles = subscription_titles(user_ids, feed)
+    end
     body = format_text(body, 90)
-    titles = subscription_titles(user_ids, feed)
-    title = format_text(feed.title, 36)
 
     notifications = tokens.each_with_object({}) { |(user_id, token), hash|
-      title = titles[user_id] || title
+      if user_title = titles[user_id]
+        title = format_text(user_title, 36)
+      end
       notification = build_notification(token, title, body, entry_id, user_id)
       hash[notification.apns_id] = notification
     }
@@ -50,15 +58,15 @@ class SafariPushNotificationSend
 
   def format_text(string, max_bytes)
     if string.present?
-      string = CGI.unescapeHTML(string)
       string = ApplicationController.helpers.sanitize(string, tags: []).squish.mb_chars
       omission = if string.length > max_bytes
-        "..."
+        "…"
       else
         ""
       end
       string = string.limit(max_bytes).to_s
-      string + omission
+      string = string.strip + omission
+      string = CGI.unescapeHTML(string)
     end
     string
   end
@@ -67,7 +75,7 @@ class SafariPushNotificationSend
     Apnotic::Notification.new(device_token).tap do |notification|
       notification.alert = {
         title: title,
-        body: body,
+        body: body
       }
       notification.url_args = [entry_id.to_s, CGI.escape(VERIFIER.generate(user_id))]
       notification.apns_id = SecureRandom.uuid

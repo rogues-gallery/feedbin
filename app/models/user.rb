@@ -388,7 +388,7 @@ class User < ApplicationRecord
   def build_feeds_by_tag
     query = <<-eos
       SELECT
-        tag_id, array_to_json(array_agg(feed_id)) as feed_ids
+        tag_id, array_to_json(array_agg(DISTINCT feed_id)) as feed_ids
       FROM
         taggings
       WHERE user_id = ? AND feed_id IN (?)
@@ -404,7 +404,7 @@ class User < ApplicationRecord
   def build_tags_by_feed
     query = <<-eos
       SELECT
-        feed_id, array_to_json(array_agg(tag_id)) as tag_ids
+        feed_id, array_to_json(array_agg(DISTINCT tag_id)) as tag_ids
       FROM
         taggings
       WHERE user_id = ? AND feed_id IN (?)
@@ -504,20 +504,75 @@ class User < ApplicationRecord
     can_read
   end
 
+  def combined_sharing_services
+    (sharing_services + supported_sharing_services)
+      .select  { |sharing_service| sharing_service.active?    }
+      .sort_by { |sharing_service| sharing_service.label      }
+      .map     { |sharing_service| sharing_service.share_link }
+      .compact
+  end
+
+  def can_read_filter(requested_ids)
+    allowed_ids = []
+
+    feed_ids = subscriptions.pluck(:feed_id)
+
+    ids = Entry.where(feed_id: feed_ids, id: requested_ids).pluck(:id)
+    allowed_ids = allowed_ids.push(ids).flatten
+
+    if requested_ids.length != allowed_ids.length
+      ids = starred_entries.where(entry_id: requested_ids).pluck(:entry_id)
+      allowed_ids = allowed_ids.push(ids).flatten
+    end
+
+    if requested_ids.length != allowed_ids.length
+      ids = recently_read_entries.where(entry_id: requested_ids).pluck(:entry_id)
+      allowed_ids = allowed_ids.push(ids).flatten
+    end
+
+    if requested_ids.length != allowed_ids.length
+      ids = recently_played_entries.where(entry_id: requested_ids).pluck(:entry_id)
+      allowed_ids = allowed_ids.push(ids).flatten
+    end
+
+    allowed_ids.uniq
+  end
+
   def trialing?
     plan == Plan.find_by_stripe_id("trial")
   end
 
+  def has_tweet?(main_tweet_id)
+    entries.where(main_tweet_id: main_tweet_id).limit(2).count > 1
+  end
+
   def twitter_credentials_valid?
-    twitter_client&.home_timeline && true
+    twitter_client.verify_credentials && true
   rescue Twitter::Error::Unauthorized
     false
   end
 
   def recently_played_entries_progress
     recently_played_entries.select(:duration, :progress, :entry_id).each_with_object({}) do |item, hash|
-      hash[item.entry_id] = {progress: item.progress, duration: item.duration }
+      hash[item.entry_id] = {progress: item.progress, duration: item.duration}
     end
+  end
+
+  def twitter_auth
+    if twitter_enabled?
+      TwitterAuth.new(screen_name: twitter_screen_name, token: twitter_access_token, secret: twitter_access_secret)
+    else
+      nil
+    end
+  end
+
+  def twitter_log_out
+    update(
+      twitter_access_token: nil,
+      twitter_access_secret: nil,
+      twitter_screen_name: nil,
+      twitter_auth_failures: nil
+    )
   end
 
   def twitter_client
@@ -530,5 +585,4 @@ class User < ApplicationRecord
       }
     end
   end
-
 end

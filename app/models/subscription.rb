@@ -21,7 +21,7 @@ class Subscription < ApplicationRecord
   validate :reject_title_changes, on: :update, if: :generated?
 
   def reject_title_changes
-   errors[:title] << "can not be changed" if self.title_changed?
+    errors[:title] << "can not be changed" if title_changed?
   end
 
   enum kind: {default: 0, generated: 1}
@@ -51,7 +51,7 @@ class Subscription < ApplicationRecord
     unread_entries = entries.map { |entry|
       UnreadEntry.new_from_owners(user, entry)
     }
-    UnreadEntry.import(unread_entries, validate: false)
+    UnreadEntry.import(unread_entries, validate: false, on_duplicate_key_ignore: true)
   end
 
   def mark_as_read

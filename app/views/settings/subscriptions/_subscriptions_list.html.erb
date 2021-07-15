@@ -67,13 +67,13 @@
                                     </span>
                                     <span class="subscription-meta">
                                         <span class="feed-url-wrap">
-                                            <%= pretty_url(subscription.feed_url) %>
+                                            <%= short_url(subscription.feed_url) %>
                                         </span>
                                     </span>
                                 </span>
                                 <span class="subscription-controls">
                                     <%= render partial: "shared/sparkline", locals: {sparkline: subscription_presenter.sparkline} %>
-                                    <%= svg_tag "icon-arrow" %>
+                                    <span class="icon-wrap"><%= svg_tag "icon-caret" %></span>
                                 </span>
                             <% end %>
                         </li>

@@ -5,7 +5,7 @@ class IframeEmbed
 
   def initialize(embed_url)
     @embed_url = URI(embed_url)
-    @embed_url.scheme ||= "http"
+    @embed_url.scheme = "https"
   end
 
   def title
@@ -28,6 +28,11 @@ class IframeEmbed
     data && data["type"]
   end
 
+  # subclass should implement these
+  def channel_name; end
+  def duration; end
+  def profile_image; end
+
   def iframe_src
     url = embed_url.dup
     params = Rack::Utils.parse_nested_query(url.query)
@@ -41,14 +46,17 @@ class IframeEmbed
   end
 
   def cache_key
-    Digest::SHA1.hexdigest(embed_url.to_s)
+    "iframe_embed_#{Digest::SHA1.hexdigest(embed_url.to_s)}"
   end
 
   def fetch
     if oembed_url
       @data ||= begin
+        Rails.cache.fetch("iframe_embed_counter_#{Digest::SHA1.hexdigest(oembed_params.to_s)}") {
+          Librato.increment("iframe_embed.fetch", source: self.class.name.parameterize)
+        }
         defaults = {
-          url: embed_url.to_s,
+          url: embed_url.to_s
         }
         response = UrlCache.new(oembed_url, params: defaults.merge(oembed_params))
         JSON.parse(response.body)
@@ -81,6 +89,7 @@ class IframeEmbed
   end
 
   def self.fetch(url)
+    url = normalize_url(url)
     parser = find_embed_source(url)
     parser = parser.new(url)
     parser.fetch
@@ -93,14 +102,24 @@ class IframeEmbed
 
   def self.embed_sources
     [
-      Embed::Youtube,
-      Embed::Vimeo,
-      Embed::Ted,
-      Embed::Spotify,
-      Embed::Kickstarter,
-      Embed::Soundcloud,
-      Embed::Default,
+      IframeEmbed::Youtube,
+      IframeEmbed::Vimeo,
+      IframeEmbed::Ted,
+      IframeEmbed::Spotify,
+      IframeEmbed::Kickstarter,
+      IframeEmbed::Soundcloud,
+      IframeEmbed::Default
     ]
+  end
+
+  def self.normalize_url(url)
+    if url.start_with?("https://cdn.embedly.com/widgets")
+      parsed = Addressable::URI.parse(url)
+      if parsed.query_values && parsed.query_values["src"]
+        url = parsed.query_values["src"]
+      end
+    end
+    url
   end
 
   def self.supported_urls

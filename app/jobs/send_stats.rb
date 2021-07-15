@@ -14,12 +14,19 @@ class SendStats
       queue_depth
       clear_empty_jobs
       sidekiq_queue_depth
+      sidekiq_latency
     end
   end
 
   def sidekiq_queue_depth
     Sidekiq::Queue.all.each do |queue|
       Librato.measure "sidekiq.queue_depth.#{queue.name}", queue.size
+    end
+  end
+
+  def sidekiq_latency
+    Sidekiq::ProcessSet.new.each do |process|
+      Librato.measure "sidekiq.latency", process["rtt_us"], source: process["tag"]
     end
   end
 
@@ -92,6 +99,7 @@ class SendStats
     stats.concat(cache_hit)
     stats.concat(index_size)
     stats.concat(database_size)
+    stats.concat(table_size)
     stats.each do |stat|
       Librato.measure("postgres.#{stat[:name]}", stat[:value], source: stat[:source])
     end
@@ -140,13 +148,33 @@ class SendStats
 
   def database_size
     stats = []
-    database = ActiveRecord::Base.connection_config[:database]
+    database = ActiveRecord::Base.connection_db_config.database
     sql = %(
       SELECT pg_database_size('#{database}') as size;
     )
     results = query(sql)
     stats << {name: "database_size", value: results[0]["size"].to_f / MEGABYTE}
     stats
+  end
+
+  def table_size
+    sql = %(
+      SELECT nspname, relname AS "table",
+      pg_total_relation_size(pg_class.oid) / ? AS "value"
+      FROM pg_class
+      LEFT JOIN pg_namespace ON (pg_namespace.oid = pg_class.relnamespace)
+      WHERE nspname NOT IN ('pg_catalog', 'information_schema')
+      AND pg_total_relation_size(pg_class.oid) > ?
+      AND pg_class.relkind <> 'i'
+      AND nspname !~ '^pg_toast'
+      ORDER BY pg_total_relation_size(pg_class.oid) DESC
+      LIMIT 20;
+    )
+    query = ActiveRecord::Base.send(:sanitize_sql_array, [sql, 1.megabyte, 1.gigabyte])
+    results = query(query)
+    results.map do |result|
+      { name: "table_size", value: result["value"], source: result["table"] }
+    end
   end
 
   def query(sql)

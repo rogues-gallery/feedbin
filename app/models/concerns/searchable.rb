@@ -11,16 +11,19 @@ module Searchable
     SORT_REGEX = /(?<=\s|^)sort:\s*(asc|desc|relevance)(?=\s|$)/i
     TAG_ID_REGEX = /tag_id:\s*(\d+)/
     TAG_GROUP_REGEX = /tag_id:\((.*?)\)/
+    PUBLISHED_REGEX = /published:\(.*?\)|published:\[.*?\]|updated:\(.*?\)|updated:\[.*?\]/
+    DATE_UNBOUNDED_REGEX = /published:[<>=+].*?(?=\s|$)|updated:[<>=+].*?(?=\s|$)/
 
     search_settings = {
+      "number_of_shards": 12,
       "analysis": {
         "analyzer": {
           "lower_exact": {
             "tokenizer": "whitespace",
-            "filter": ["lowercase"],
-          },
-        },
-      },
+            "filter": ["lowercase"]
+          }
+        }
+      }
     }
 
     settings search_settings do
@@ -34,6 +37,7 @@ module Searchable
         indexes :feed_id, type: "long", index: :not_analyzed, include_in_all: false
         indexes :published, type: "date", include_in_all: false
         indexes :updated, type: "date", include_in_all: false
+        indexes :link, analyzer: "lower_exact"
 
         indexes :twitter_screen_name, analyzer: "whitespace"
         indexes :twitter_name, analyzer: "whitespace"
@@ -52,7 +56,7 @@ module Searchable
         queries = searches.map { |search|
           {
             index: Entry.index_name,
-            search: search.query,
+            search: search.query
           }
         }
 
@@ -74,7 +78,7 @@ module Searchable
       saved_searches.map { |saved_search|
         query_string = saved_search.query
 
-        next if query_string =~ READ_REGEX
+        next if READ_REGEX.match?(query_string)
 
         query_string = query_string.gsub(UNREAD_REGEX, "")
         query_string = {query: "#{query_string} is:unread"}
@@ -89,16 +93,17 @@ module Searchable
     end
 
     def self.scoped_search(params, user)
-      options = build_search(params, user)
-      query = build_query(options)
+      per_page = params.delete(:per_page)
+      options  = build_search(params, user)
+      query    = build_query(options)
 
-      result = $search[:main].indices.validate_query({ index: Entry.index_name, body: {query: query[:query]} })
+
+      result = $search[:main].indices.validate_query({index: Entry.index_name, body: {query: query[:query]}})
       if result["valid"] == false
         Entry.search(nil).records
       else
-        Entry.search(query).page(params[:page]).records(includes: :feed)
+        Entry.search(query).paginate(page: params[:page], per_page: per_page || 100).records(includes: :feed)
       end
-
     end
 
     def self.build_query(options)
@@ -123,11 +128,11 @@ module Searchable
               bool: {
                 should: [
                   {terms: {feed_id: options[:feed_ids]}},
-                  {terms: {id: options[:starred_ids]}},
-                ],
-              },
-            },
-          },
+                  {terms: {id: options[:starred_ids]}}
+                ]
+              }
+            }
+          }
         }
         if options[:query].present?
           hash[:query][:bool][:must] = {
@@ -135,18 +140,18 @@ module Searchable
               fields: ["_all", "title.*", "content.*", "emoji", "author", "url"],
               quote_field_suffix: ".exact",
               default_operator: "AND",
-              query: options[:query],
-            },
+              query: options[:query]
+            }
           }
         end
         if options[:ids].present?
           hash[:query][:bool][:filter][:bool][:must] = {
-            terms: {id: options[:ids]},
+            terms: {id: options[:ids]}
           }
         end
         if options[:not_ids].present?
           hash[:query][:bool][:filter][:bool][:must_not] = {
-            terms: {id: options[:not_ids]},
+            terms: {id: options[:not_ids]}
           }
         end
       end
@@ -174,24 +179,38 @@ module Searchable
         params[:query] = params[:query].gsub(SORT_REGEX, "")
       end
 
+      extracted_fields = []
+
       if params[:query]
-        params[:query] = params[:query].gsub(TAG_ID_REGEX) do |s|
+        params[:query] = params[:query].gsub(TAG_ID_REGEX) { |s|
           tag_id = Regexp.last_match[1]
           feed_ids = user.taggings.where(tag_id: tag_id).pluck(:feed_id)
           id_string = feed_ids.join(" OR ")
           "feed_id:(#{id_string})"
-        end
+        }
 
-        params[:query] = params[:query].gsub(TAG_GROUP_REGEX) do |s|
+        params[:query] = params[:query].gsub(TAG_GROUP_REGEX) { |s|
           tag_group = Regexp.last_match[1]
           tag_ids = tag_group.split(" OR ")
           feed_ids = user.taggings.where(tag_id: tag_ids).pluck(:feed_id).uniq
           id_string = feed_ids.join(" OR ")
           "feed_id:(#{id_string})"
-        end
+        }
+
+        params[:query] = params[:query].gsub(PUBLISHED_REGEX) { |match|
+          extracted_fields.push(match)
+          ""
+        }
+
+        params[:query] = params[:query].gsub(DATE_UNBOUNDED_REGEX) { |match|
+          extracted_fields.push(match)
+          ""
+        }
       end
 
       params[:query] = FeedbinUtils.escape_search(params[:query])
+
+      params[:query] = extracted_fields.push(params[:query]).join(" ")
 
       options = {
         query: params[:query],
@@ -199,7 +218,7 @@ module Searchable
         starred_ids: [],
         ids: [],
         not_ids: [],
-        feed_ids: [],
+        feed_ids: []
       }
 
       if params[:sort] && %w[desc asc relevance].include?(params[:sort])

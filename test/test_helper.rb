@@ -2,7 +2,6 @@ require "coveralls"
 Coveralls.wear!("rails")
 
 ENV["RAILS_ENV"] ||= "test"
-ENV["REDIS_URL"] = "redis://localhost:7776"
 
 require File.expand_path("../../config/environment", __FILE__)
 require "rails/test_help"
@@ -20,15 +19,25 @@ require "support/push_server_mock"
 ActiveRecord::FixtureSet.context_class.send :include, LoginHelper
 StripeMock.webhook_fixture_path = "./test/fixtures/stripe_webhooks/"
 WebMock.disable_net_connect!(allow_localhost: true, allow: "codeclimate.com")
+Sidekiq.logger.level = Logger::WARN
 
-redis_test_instance = IO.popen("redis-server --port 7776")
-Minitest.after_run do
-  Process.kill("INT", redis_test_instance.pid)
+unless ENV["CI"]
+  socket = Socket.new(:INET, :STREAM, 0)
+  socket.bind(Addrinfo.tcp("127.0.0.1", 0))
+  port = socket.local_address.ip_port
+  socket.close
+
+  ENV["REDIS_URL"] = "redis://localhost:%d" % port
+  redis_test_instance = IO.popen("redis-server --port %d --save '' --appendonly no" % port)
+
+  Minitest.after_run do
+    Process.kill("INT", redis_test_instance.pid)
+  end
 end
 
 $redis = {
   entries: ConnectionPool.new(size: 10) { Redis.new(url: ENV["REDIS_URL"]) },
-  refresher: ConnectionPool.new(size: 10) { Redis.new(url: ENV["REDIS_URL"]) },
+  refresher: ConnectionPool.new(size: 10) { Redis.new(url: ENV["REDIS_URL"]) }
 }
 
 class ActiveSupport::TestCase
@@ -52,16 +61,18 @@ class ActiveSupport::TestCase
     JSON.parse(@response.body)
   end
 
-  def stub_request_file(file, url, response_options = {})
-    file = File.join(Rails.root, "test/support/www", file)
-    options = {body: File.new(file), status: 200}.merge(response_options)
-    stub_request(:get, url).
-      to_return(options)
+  def support_file(file)
+    File.join(Rails.root, "test/support/www", file)
   end
 
-  def load_tweet
-    file = File.join(Rails.root, "test/support/tweet_one.json")
-    JSON.parse(File.read(file))
+  def stub_request_file(file, url, response_options = {})
+    options = {body: File.new(support_file(file)), status: 200}.merge(response_options)
+    stub_request(:get, url)
+      .to_return(options)
+  end
+
+  def load_tweet(option)
+    JSON.parse(File.read(support_file("tweet_#{option}.json")))
   end
 
   def create_stripe_plan(plan)
@@ -113,7 +124,7 @@ class ActiveSupport::TestCase
       "stripped-html" => "<html><head><meta http-equiv=\"Content-Type\" content=\"text/html charset=us-ascii\"></head><body style=\"word-wrap: break-word; -webkit-nbsp-mode: space; -webkit-line-break: after-white-space;\" class=\"\"><div style=\"margin: 0px; line-height: normal;\" class=\"\"><b class=\"\">Lorem ipsum</b> dolor sit amet, consectetur adipisicing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation.</div></body></html>",
       "stripped-text" => "Lorem ipsum dolor sit amet, consectetur adipisicing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation .",
       "stripped-signature" => "",
-      "List-Unsubscribe" => "<http://www.host.com/list.cgi?cmd=unsub&lst=list>, <mailto:list-request@host.com?subject=unsubscribe>",
+      "List-Unsubscribe" => "<http://www.host.com/list.cgi?cmd=unsub&lst=list>, <mailto:list-request@host.com?subject=unsubscribe>"
     }
   end
 end

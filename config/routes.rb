@@ -1,6 +1,4 @@
 require "sidekiq/web"
-
-Sidekiq::Web.set :session_secret, Rails.application.secrets.secret_key_base
 Sidekiq::Web.app_url = ENV["FEEDBIN_URL"]
 
 Rails.application.routes.draw do
@@ -16,10 +14,11 @@ Rails.application.routes.draw do
   get :health_check, to: proc { |env| [200, {}, ["OK"]] }
   get :version, to: proc { |env| [200, {}, [File.read("REVISION")]] }
   get :subscribe, to: "site#subscribe"
-  get :headers, to: "site#headers"
+  get :service_worker, to: "site#service_worker"
+  get "manifest/:theme", to: "site#manifest", as: "manifest"
 
-  post "/emails" => "emails#create"
   post "/newsletters" => "newsletters#create"
+  post "/newsletters/:token" => "newsletters#raw"
   get "bookmarklet/:cache_buster", to: "bookmarklet#script", as: "bookmarklet"
 
   match "/404", to: "errors#not_found", via: :all
@@ -49,6 +48,10 @@ Rails.application.routes.draw do
 
   # Error log
   post "apple_push_notifications/:version/log", as: :apple_push_notifications_log, to: "apple_push_notifications#log"
+
+  # WebSub
+  get  "web_sub/:id/:signature", as: :web_sub_verify,  to: "web_sub#verify"
+  post "web_sub/:id/:signature", as: :web_sub_publish, to: "web_sub#publish"
 
   resource :app, only: [] do
     member do
@@ -220,9 +223,10 @@ Rails.application.routes.draw do
     end
   end
 
-  match "pages", to: "pages#create", via: [:post]
-  match "pages", to: "pages#options", via: [:options]
-  match "pages", to: "pages#fallback", via: [:get]
+  match "pages",          to: "pages#create",          via: :post
+  match "pages",          to: "pages#options",         via: :options
+  match "pages",          to: "pages#fallback",        via: :get
+  match "pages_internal", to: "pages_internal#create", via: :post
 
   constraints subdomain: "api" do
     namespace :api, path: nil do

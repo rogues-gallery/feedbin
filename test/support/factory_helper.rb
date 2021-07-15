@@ -25,8 +25,8 @@ module FactoryHelper
       public_id: SecureRandom.hex,
       entry_id: SecureRandom.hex,
       data: {
-        enclosure_url: Faker::Internet.url,
-      },
+        enclosure_url: Faker::Internet.url
+      }
     )
   end
 
@@ -36,9 +36,11 @@ module FactoryHelper
     end
   end
 
-  def create_tweet_entry(feed)
+  def create_tweet_entry(feed, option = "one")
+    tweet = load_tweet(option)
     entry = create_entry(feed)
-    entry.data["tweet"] = load_tweet
+    entry.data["tweet"] = tweet
+    entry.main_tweet_id = tweet["id"]
     entry.save!
     entry
   end
@@ -50,7 +52,7 @@ module FactoryHelper
     user = User.create(
       email: "cc@example.com",
       password: default_password,
-      plan: plan,
+      plan: plan
     )
     user.stripe_token = card
     user.save

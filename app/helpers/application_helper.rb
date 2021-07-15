@@ -16,10 +16,6 @@ module ApplicationHelper
     "active" if controller.include?(params[:controller]) && action.include?(params[:action])
   end
 
-  def mark_selected?
-    @mark_selected || false
-  end
-
   def rtl?(string)
     unless string.blank?
       rtl_test = /[\u0600-\u06FF]|[\u0750-\u077F]|[\u0590-\u05FF]|[\uFE70-\uFEFF]/m
@@ -30,6 +26,10 @@ module ApplicationHelper
         percentage > 50
       end
     end
+  end
+
+  def json_array(&block)
+    raw "[#{yield}]"
   end
 
   def rtl(string)
@@ -49,7 +49,7 @@ module ApplicationHelper
   def get_icon(name)
     name = name.sub(".svg", "")
     icon = Feedbin::Application.config.icons[name]
-    if !icon
+    unless icon
       file = "#{Rails.root}/app/assets/svg/#{name}.svg"
       if File.file?(file)
         icon = Feedbin::Application.config.icons[name] = SvgIcon.new_from_file(file)
@@ -79,8 +79,14 @@ module ApplicationHelper
 
     options[:class] = [name, options[:class]].compact.join(" ")
 
+    inline = options.delete(:inline)
+
     content_tag :svg, options do
-      content_tag :use, "", "xlink:href": "##{name}"
+      if inline
+        icon.markup.html_safe
+      else
+        content_tag :use, "", "href": "##{name}"
+      end
     end
   end
 
@@ -110,7 +116,7 @@ module ApplicationHelper
       scheme: "https",
       host: "www.google.com",
       path: "/s2/favicons",
-      query: {domain: host}.to_query,
+      query: {domain: host}.to_query
     )
     uri.scheme = "https"
     uri.to_s
@@ -122,14 +128,41 @@ module ApplicationHelper
     image_tag(image_args.first, options)
   end
 
+  def short_url(url)
+    pretty_url(url).truncate(40, omission: "…") if url
+  end
+
   def pretty_url(url)
-    url && url.sub("http://", "").sub("https://", "").gsub(/\/$/, "").truncate(40, omission: "...")
+    if url
+      url = strip_basic_auth(url)
+      url = strip_screen_name(url)
+      url.sub("http://", "").sub("https://", "").gsub(/\/$/, "")
+    end
+  rescue => exception
+    Honeybadger.notify(exception)
+    url
+  end
+
+  def strip_basic_auth(url)
+    Feedkit::BasicAuth.parse(url).url
+  rescue
+    url
+  end
+
+  def strip_screen_name(url)
+    uri = Addressable::URI.heuristic_parse(url)
+    query = uri.query_values.except("screen_name")
+    query = nil if query.empty?
+    uri.query_values = query
+    uri.to_s
+  rescue
+    url
   end
 
   def camo_link(url)
     options = {
       asset_proxy: ENV["CAMO_HOST"],
-      asset_proxy_secret_key: ENV["CAMO_KEY"],
+      asset_proxy_secret_key: ENV["CAMO_KEY"]
     }
     pipeline = HTML::Pipeline::CamoFilter.new(nil, options, nil)
     pipeline.asset_proxy_url(url.to_s)
@@ -165,7 +198,10 @@ module ApplicationHelper
   end
 
   def short_number(number)
-    number_to_human(number, format: '%n%u', precision: 2, units: { thousand: 'K', million: 'M', billion: 'B' })
+    number_to_human(number, format: "%n%u", precision: 2, units: {thousand: "K", million: "M", billion: "B"})
   end
 
+  def xml_format(content, entry)
+    raw(ContentFormatter.absolute_source(content, entry))
+  end
 end

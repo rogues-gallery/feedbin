@@ -1,5 +1,4 @@
 class ExtractsController < ApplicationController
-
   def entry
     @user = current_user
     @entry = Entry.find params[:id]
@@ -15,7 +14,7 @@ class ExtractsController < ApplicationController
         @content = @entry.content
       end
     rescue => e
-      @content = check_for_image(@entry, url)
+      @content = nil
     end
 
     begin
@@ -41,5 +40,4 @@ class ExtractsController < ApplicationController
     ViewLinkCache.perform_async(params[:url], Expires.expires_in(1.minute))
     head :ok
   end
-
 end

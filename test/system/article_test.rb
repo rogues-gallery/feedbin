@@ -57,6 +57,32 @@ class ArticleTest < ApplicationSystemTestCase
     assert_selector ".embed-title", text: "Samsung Galaxy Note 9 Impressions: Underrated!"
   end
 
+  test "twitter embed" do
+    show_article_setup
+
+    entry = create_tweet_entry(@entries.first.feed)
+
+    SaveTwitterUsers.new.perform(entry.id)
+
+    stub_request_file("twitter_oembed.json", /publish\.twitter\.com/, headers: {"Content-Type" => "application/json; charset=utf-8"})
+
+    @entries.first.update(content: %(Tweet <blockquote class="twitter-tweet"><a href="https://twitter.com/9to5mac/status/1280625051822436353">May 24, 2019</a></blockquote>))
+
+    login_as(@user)
+
+    click_link(@entries.first.title)
+
+    sleep 1
+    wait_for_ajax
+
+    pipeline = HTML::Pipeline::CamoFilter.new(nil, { asset_proxy: ENV["CAMO_HOST"], asset_proxy_secret_key: ENV["CAMO_KEY"] }, nil)
+    url = pipeline.asset_proxy_url("https://pbs.twimg.com/profile_images/659486593649012736/-TGFT8rs_bigger.png")
+
+    assert_selector ".profile-image img[src='#{url}']"
+    assert_selector ".tweet-body", text: "iOS 14 will let you"
+
+  end
+
   test "diff" do
     show_article_setup
 
@@ -71,27 +97,39 @@ class ArticleTest < ApplicationSystemTestCase
 
     wait_for_ajax
 
-    find('label[for=diff_view]').click()
+    find("label[for=diff_view]").click
 
     assert_selector "ins", text: "new"
   end
 
-  # test "newsletter" do
-  #   show_article_setup
-  #
-  #   entry = @entries.first
-  #   entry.feed.newsletter!
-  #
-  #   login_as(@user)
-  #
-  #   click_link(@entries.first.title)
-  #
-  #   wait_for_ajax
-  #
-  #   find('label[for=newsletter_view]').click()
-  #
-  #   assert_selector ".newsletter-content"
-  # end
+  test "direct link" do
+    show_article_setup
+
+    entry = @entries.first
+
+    login_as(@user)
+
+    visit entry_path(entry)
+
+    assert_selector "#source_link h1", text: entry.title
+  end
+
+  test "newsletter" do
+    show_article_setup
+
+    entry = @entries.first
+    entry.feed.newsletter!
+
+    login_as(@user)
+
+    click_link(@entries.first.title)
+
+    wait_for_ajax
+
+    find('label[for=newsletter_view]').click()
+
+    assert_selector ".newsletter-content"
+  end
 
   test "extract" do
     show_article
@@ -99,7 +137,7 @@ class ArticleTest < ApplicationSystemTestCase
 
     stub_request_file("parsed_page.json", /extract\.example\.com/, headers: {"Content-Type" => "application/json; charset=utf-8"})
 
-    find('.button-toggle-content').click()
+    find(".button-toggle-content").click
 
     assert_selector ".original-meta strong", text: "Originally from:"
   end

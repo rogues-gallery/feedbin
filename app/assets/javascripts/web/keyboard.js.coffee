@@ -20,7 +20,7 @@ class feedbin.Keyboard
 
   bindEvents: ->
     $(document).on 'click', '[data-behavior~=open_item]',  (event) =>
-      parent = $(event.currentTarget).parents('div')
+      parent = $(event.currentTarget).closest('.entries,.feeds')
       if parent.hasClass('entries')
         @selectColumn('entries')
       else if parent.hasClass('feeds')
@@ -172,6 +172,7 @@ class feedbin.Keyboard
       else if @hasUnreadFeeds()
         @selectNextUnreadFeed()
       event.preventDefault()
+      event.stopPropagation()
 
     # Star
     Mousetrap.bind 's', (event, combo) =>
@@ -276,11 +277,12 @@ class feedbin.Keyboard
         event.preventDefault()
 
     # sharing hotkeys
-    Mousetrap.bind ['1', '2', '3', '4', '5', '6', '7', '8', '9'], (event, combo) =>
+    Mousetrap.bind ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'], (event, combo) =>
       shareMenu = $('[data-behavior~=share_options]')
       if shareMenu.length > 0
-        shareIndex = combo - 1
-        $('li', shareMenu).eq(shareIndex).find('a')[0].click()
+        item = $("[data-keyboard-shortcut=#{combo}]", shareMenu)
+        $("[data-keyboard-shortcut=#{combo}]", shareMenu)[0].click()
+        event.preventDefault()
 
     # Full Screen
     Mousetrap.bind 'F', (event, combo) =>
@@ -296,6 +298,7 @@ class feedbin.Keyboard
 
     # Unfocus field,
     Mousetrap.bindGlobal 'escape', (event, combo) =>
+      $('.dropdown-wrap.open').removeClass('open')
       feedbin.hideSubscribe()
       feedbin.hideSearch()
       if $('[name="subscription[feeds][feed_url]"]').is(':focus')
@@ -393,7 +396,7 @@ class feedbin.Keyboard
 
   selectColumn: (column) ->
     @selectedColumn = $(".#{column}")
-    $("[data-behavior~=content_column]").removeClass('selected')
+    $("[data-behavior~=content_column].selected").removeClass('selected')
     $(".#{column}").closest("[data-behavior~=content_column]").addClass('selected')
 
   itemInView: ->
@@ -455,10 +458,10 @@ class feedbin.Keyboard
     next
 
   inDrawer: ->
-    @selectedItem().parents('.drawer').length >= 1
+    @selectedItem().closest('.drawer').length >= 1
 
   hasDrawer: ->
-    @drawer.length >= 1 && @drawer.data('hidden') == false
+    @drawer.length >= 1 && @drawer.closest('[data-tag-id]').hasClass('open')
 
   getItemPosition: ->
     try

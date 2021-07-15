@@ -10,9 +10,9 @@ class FeedRefresherReceiverTest < ActiveSupport::TestCase
   test "should create entry" do
     params = {
       "feed" => {
-        "id" => @feed.id,
+        "id" => @feed.id
       },
-      "entries" => [build_entry],
+      "entries" => [build_entry]
     }
     assert_difference "Entry.count", +1 do
       FeedRefresherReceiver.new.perform(params)
@@ -22,26 +22,46 @@ class FeedRefresherReceiverTest < ActiveSupport::TestCase
   test "should schedule WarmCache job" do
     params = {
       "feed" => {
-        "id" => @feed.id,
+        "id" => @feed.id
       },
-      "entries" => [build_entry],
+      "entries" => [build_entry]
     }
 
     Sidekiq::Worker.clear_all
-    assert_difference "WarmCache.jobs.size", +1 do
-      FeedRefresherReceiver.new.perform(params)
-    end
   end
 
-  test "should not create entry" do
+  test "should not create entry with existing public_id" do
+    public_id = SecureRandom.hex
+    entry = @feed.entries.create!(url: "url", public_id: public_id)
+
+    assert FeedbinUtils.public_id_exists?(public_id)
+    $redis[:refresher].with do |redis|
+      redis.del(public_id)
+    end
+    assert_not FeedbinUtils.public_id_exists?(public_id)
+
+    params = {
+      "feed" => {
+        "id" => @feed.id
+      },
+      "entries" => [build_entry(public_id)]
+    }
+    assert_no_difference "Entry.count" do
+      FeedRefresherReceiver.new.perform(params)
+    end
+
+    assert FeedbinUtils.public_id_exists?(public_id)
+  end
+
+  test "should not create entry with existing public_id_alt" do
     public_id = SecureRandom.hex
     entry = @feed.entries.create!(url: "url", public_id: "#{public_id}_alt")
 
     params = {
       "feed" => {
-        "id" => @feed.id,
+        "id" => @feed.id
       },
-      "entries" => [build_entry(public_id)],
+      "entries" => [build_entry(public_id)]
     }
     assert_no_difference "Entry.count" do
       FeedRefresherReceiver.new.perform(params)
@@ -52,9 +72,9 @@ class FeedRefresherReceiverTest < ActiveSupport::TestCase
     entry = build_entry
     params = {
       "feed" => {
-        "id" => @feed.id,
+        "id" => @feed.id
       },
-      "entries" => [entry],
+      "entries" => [entry]
     }
     FeedbinUtils.update_public_id_cache(entry["data"]["public_id_alt"], "")
     assert_no_difference "Entry.count" do
@@ -68,9 +88,9 @@ class FeedRefresherReceiverTest < ActiveSupport::TestCase
     update = build_entry(entry.public_id, true)
     params = {
       "feed" => {
-        "id" => @feed.id,
+        "id" => @feed.id
       },
-      "entries" => [update],
+      "entries" => [update]
     }
     FeedRefresherReceiver.new.perform(params)
     update.each do |attribute, value|
@@ -108,7 +128,7 @@ class FeedRefresherReceiverTest < ActiveSupport::TestCase
 
   def build_entry(public_id = SecureRandom.hex, update = false)
     data = {
-      "public_id_alt" => public_id + "_alt",
+      "public_id_alt" => public_id + "_alt"
     }
     {
       "author" => SecureRandom.hex,
@@ -118,7 +138,7 @@ class FeedRefresherReceiverTest < ActiveSupport::TestCase
       "title" => SecureRandom.hex,
       "url" => Faker::Internet.url,
       "update" => update,
-      "data" => data,
+      "data" => data
     }
   end
 
@@ -129,9 +149,9 @@ class FeedRefresherReceiverTest < ActiveSupport::TestCase
     update["content"] = update["content"] * 10
     {
       "feed" => {
-        "id" => @feed.id,
+        "id" => @feed.id
       },
-      "entries" => [update],
+      "entries" => [update]
     }
   end
 end

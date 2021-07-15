@@ -3,7 +3,7 @@ class Entry < ApplicationRecord
 
   attr_accessor :fully_qualified_url, :read, :starred, :skip_mark_as_unread, :skip_recent_post_check
 
-  store :settings, accessors: [:archived_images], coder: JSON
+  store :settings, accessors: [:archived_images, :media_image, :newsletter, :newsletter_from], coder: JSON
 
   belongs_to :feed
   has_many :unread_entries, dependent: :delete_all
@@ -13,7 +13,7 @@ class Entry < ApplicationRecord
   before_create :ensure_published
   before_create :create_summary
   before_create :update_content
-  before_create :tweet_url
+  before_create :tweet_metadata
   before_update :create_summary
   after_commit :cache_public_id, on: :create
   after_commit :find_images, on: :create
@@ -23,7 +23,9 @@ class Entry < ApplicationRecord
   after_commit :increment_feed_stat, on: :create
   after_commit :touch_feed_last_published_entry, on: :create
   after_commit :harvest_links, on: :create
-  after_commit :cache_extracted_content, on: :create
+  after_commit :harvest_embeds, on: [:create, :update]
+  after_commit :cache_views, on: [:create, :update]
+  after_commit :save_twitter_users, on: [:create]
 
   validate :has_content
   validates :feed, :public_id, presence: true
@@ -58,7 +60,7 @@ class Entry < ApplicationRecord
   end
 
   def json_feed
-    data&.respond_to?(:dig) && data.dig("json_feed")
+    data&.respond_to?(:dig) && data&.dig("json_feed")
   end
 
   def twitter_thread_ids
@@ -83,11 +85,13 @@ class Entry < ApplicationRecord
       tweets = [main_tweet]
       tweets.push(main_tweet.quoted_status) if main_tweet.quoted_status?
 
-      media = tweets.find { |tweet|
+      media = tweets.find do |tweet|
         return true if tweet.media?
         urls = tweet.urls.reject { |url| url.expanded_url.host == "twitter.com" }
         return true unless urls.empty?
-      }
+      rescue
+        false
+      end
     end
     !!media
   end
@@ -96,25 +100,48 @@ class Entry < ApplicationRecord
     tweet? ? tweet.retweeted_status? : false
   end
 
-  def tweet_summary(tweet = nil)
+  def link_tweet?
+    return false unless tweet?
+    return false if main_tweet.quoted_status?
+    main_tweet.urls.length == 1
+  end
+
+  def strip_trailing_link?
+    hash = main_tweet.to_h
+    link_preview? && main_tweet.urls.first.indices.last == hash[:full_text].length
+  end
+
+  def link_preview?
+    return false unless link_tweet?
+    return false if image.present?
+    return false unless data.dig("saved_pages", main_tweet.urls.first.expanded_url.to_s).present?
+    return false if data.dig("saved_pages", main_tweet.urls.first.expanded_url.to_s, "result", "error")
+    data.dig("twitter_link_image_processed").present?
+  end
+
+  def tweet_summary(tweet = nil, strip_trailing_link = false)
     tweet ||= main_tweet
     hash = tweet.to_h
 
     text = trim_text(hash, true)
     tweet.urls.reverse_each do |url|
       range = Range.new(*url.indices, true)
-      text[range] = url.display_url
+      if strip_trailing_link && strip_trailing_link?
+        text[range] = ""
+      else
+        text[range] = url.display_url
+      end
     rescue
     end
     text
   end
 
-  def tweet_text(tweet)
+  def tweet_text(tweet, options = {})
     hash = tweet.to_h
     if hash[:entities]
       hash = remove_entities(hash)
       text = trim_text(hash, false, true)
-      text = Twitter::TwitterText::Autolink.auto_link_with_json(text, hash[:entities]).html_safe
+      text = Twitter::TwitterText::Autolink.auto_link_with_json(text, hash[:entities], options).html_safe
     else
       text = hash[:full_text]
     end
@@ -138,7 +165,7 @@ class Entry < ApplicationRecord
         hash[:entities][entity].each_with_index do |value, index|
           hash[:entities][entity][index][:indices] = [
             value[:indices][0] - text_start,
-            value[:indices][1] - text_start,
+            value[:indices][1] - text_start
           ]
         end
       end
@@ -186,7 +213,7 @@ class Entry < ApplicationRecord
   end
 
   def self.entries_list
-    select(:id, :feed_id, :title, :summary, :published, :image, :data, :author, :url, :updated_at)
+    select(:id, :feed_id, :title, :summary, :published, :image, :data, :author, :url, :updated_at, :settings)
   end
 
   def self.include_unread_entries(user_id)
@@ -233,28 +260,18 @@ class Entry < ApplicationRecord
     feed.site_url
   end
 
+  def rebase_url(original_url)
+    base_url = Addressable::URI.heuristic_parse(fully_qualified_url)
+    original_url = Addressable::URI.heuristic_parse(original_url)
+    Addressable::URI.join(base_url, original_url)
+  end
+
   def content_format
     data && data["format"] || "default"
   end
 
-  def as_indexed_json(options = {})
-    base = as_json(root: false, only: Entry.mappings.to_hash[:entry][:properties].keys.reject { |key| key.to_s.start_with?("twitter") })
-    base["title"] = ContentFormatter.summary(title)
-    base["content"] = ContentFormatter.summary(content)
-    base["emoji"] = (base["title"] + base["content"]).scan(Unicode::Emoji::REGEX).join(" ")
-
-    if tweet?
-      tweets = [main_tweet]
-      tweets.push(main_tweet.quoted_status) if main_tweet.quoted_status?
-      base["twitter_screen_name"] = "#{main_tweet.user.screen_name} @#{main_tweet.user.screen_name}"
-      base["twitter_name"] = main_tweet.user.name
-      base["twitter_retweet"] = tweet.retweeted_status?
-      base["twitter_quoted"] = tweet.quoted_status?
-      base["twitter_media"] = twitter_media?
-      base["twitter_image"] = !!(tweets.find { |tweet| tweet.media? })
-      base["twitter_link"] = !!(tweets.find { |tweet| tweet.urls? })
-    end
-    base
+  def search_data
+    SearchData.new(self).to_h
   end
 
   def public_id_alt
@@ -277,8 +294,21 @@ class Entry < ApplicationRecord
   end
 
   def itunes_image
-    if data && data["itunes_image_processed"]
-      image_url = data["itunes_image_processed"]
+    if media_image || (data && data["itunes_image_processed"])
+      image_url = media_image || data["itunes_image_processed"]
+
+      host = ENV["ENTRY_IMAGE_HOST"]
+
+      url = URI(image_url)
+      url.host = host if host
+      url.scheme = "https"
+      url.to_s
+    end
+  end
+
+  def tweet_link_image
+    if data && data["twitter_link_image_processed"]
+      image_url = data["twitter_link_image_processed"]
 
       host = ENV["ENTRY_IMAGE_HOST"]
 
@@ -292,15 +322,16 @@ class Entry < ApplicationRecord
   def update_content
     original = content
     if tweet?
-      self.content = ApplicationController.render(template: "entries/_tweet_default.html.erb", locals: {entry: self}, layout: nil)
+      self.content = ApplicationController.render(template: "entries/_tweet_default", formats: :html, locals: {entry: self}, layout: nil)
     end
   rescue
     self.content = original
   end
 
-  def tweet_url
+  def tweet_metadata
     if main_tweet
       self.url = main_tweet.uri.to_s
+      self.main_tweet_id = main_tweet.id
     end
   rescue
   end
@@ -313,7 +344,7 @@ class Entry < ApplicationRecord
           before = ContentFormatter.format!(original["content"], self)
           after = ContentFormatter.format!(content, self)
           result = HTMLDiff::Diff.new("<div>#{before}</div>", "<div>#{after}</div>").inline_html
-          result = Sanitize.fragment(result, Sanitize::Config::RELAXED).html_safe
+          result = result.html_safe
         rescue
         end
       end
@@ -340,6 +371,10 @@ class Entry < ApplicationRecord
     nil
   end
 
+  def youtube?
+    data && data["youtube_video_id"].present?
+  end
+
   private
 
   def base_url
@@ -356,8 +391,8 @@ class Entry < ApplicationRecord
   end
 
   def ensure_published
-    now = DateTime.now
-    if published.nil? || published > now || published.to_i == 0
+    now = Time.now
+    if published.nil? || published > now || published.to_i <= 0
       self.published = now
     end
     true
@@ -380,11 +415,15 @@ class Entry < ApplicationRecord
         end
       end
 
-      subscriptions = Subscription.where(filters).pluck(:user_id)
-      unread_entries = subscriptions.each_with_object([]) { |user_id, array|
+      user_ids = Subscription.where(filters).pluck(:user_id)
+      unread_entries = user_ids.each_with_object([]) { |user_id, array|
+        if tweet?
+          has_tweet = User.where(id: user_id).take&.has_tweet?(main_tweet_id)
+          Librato.increment("user.has_tweet", source: has_tweet.to_s)
+        end
         array << UnreadEntry.new(user_id: user_id, feed_id: feed_id, entry_id: id, published: published, entry_created_at: created_at)
       }
-      UnreadEntry.import(unread_entries, validate: false)
+      UnreadEntry.import(unread_entries, validate: false, on_duplicate_key_ignore: true)
     end
     SearchIndexStore.perform_async(self.class.name, id)
   end
@@ -437,17 +476,31 @@ class Entry < ApplicationRecord
   end
 
   def find_images
-    EntryImage.perform_async(id)
+    EntryImage.perform_async(public_id)
     if data && data["itunes_image"]
-      ItunesImage.perform_async(id, data["itunes_image"])
+      ItunesImage.perform_async(public_id)
     end
+  end
+
+  def has_embeds?
+    return true if youtube?
+    return true if content.respond_to?(:include?) && content.include?("iframe")
+    return false
+  end
+
+  def harvest_embeds
+    HarvestEmbeds.perform_async(id) if has_embeds?
   end
 
   def harvest_links
     HarvestLinks.perform_async(id) if tweet?
   end
 
-  def cache_extracted_content
-    CacheExtractedContent.perform_async(id, feed_id)
+  def cache_views
+    CacheEntryViews.new.perform(id)
+  end
+
+  def save_twitter_users
+    SaveTwitterUsers.perform_async(id) if tweet?
   end
 end

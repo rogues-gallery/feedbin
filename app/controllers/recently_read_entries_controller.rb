@@ -1,7 +1,6 @@
 class RecentlyReadEntriesController < ApplicationController
   def index
     @user = current_user
-    update_selected_feed!("collection_recently_read")
 
     recently_read_entry_ids = @user.recently_read_entries.order(id: :desc).limit(100).pluck(:entry_id)
     @entries = Entry.where(id: recently_read_entry_ids).includes(feed: [:favicon]).entries_list
@@ -16,12 +15,13 @@ class RecentlyReadEntriesController < ApplicationController
   end
 
   def settings
-
   end
 
   def create
     @user = current_user
-    RecentlyReadEntry.create(user: @user, entry_id: params[:id])
+    if @user.can_read_entry?(params[:id])
+      RecentlyReadEntry.create(user: @user, entry_id: params[:id])
+    end
     head :ok
   end
 

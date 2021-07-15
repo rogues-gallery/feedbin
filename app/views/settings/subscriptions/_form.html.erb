@@ -1,4 +1,4 @@
-<%= form_with model: subscription, url: settings_subscription_path, html: {class: 'settings'} do |f| %>
+<%= form_with model: subscription, url: settings_subscription_path, html: {class: 'settings'}, data: {remote: true} do |f| %>
     <% present subscription do |subscription_presenter| %>
         <div class="feed-profile">
             <div class="inset">
@@ -19,9 +19,15 @@
                                 <div></div>
                                 <div></div>
                             </div>
-                            <div class="graph">
+                            <div class="graph" data-behavior="hide_tooltip tooltip_controller">
+                                <div class="tooltip-large hide" data-behavior="tooltip_target">
+                                    <div class="date" data-behavior="tooltip_day"></div>
+                                    <div class="count" data-behavior="tooltip_count"></div>
+                                </div>
                                 <% subscription_presenter.graph_bars.each do |data| %>
-                                   <div style="height: <%= data.percent %>%;" title="<%= subscription_presenter.bar_title(data) %>" class="<%= subscription_presenter.bar_class(data) %>"></div>
+                                    <div class="bar-sleeve" data-day="<%= data.day %>" data-count="<%= subscription_presenter.bar_count(data) %>" data-behavior="show_tooltip">
+                                        <div style="height: <%= data.percent %>%;" class="bar <%= subscription_presenter.bar_class(data) %>"></div>
+                                    </div>
                                 <% end %>
                             </div>
                             <div class="x-axis">
@@ -81,18 +87,22 @@
                                 Website
                             </td>
                             <td>
-                                <a href="<%= subscription.feed.site_url %>" class="extra-muted"><span><%= pretty_url(subscription.feed.site_url) %></span></a>
-                            </td>
-                        </tr>
-                        <tr>
-                            <td>
-                                Feed
-                            </td>
-                            <td>
-                                <a href="<%= subscription.feed.feed_url %>" class="extra-muted"><span><%= pretty_url(subscription.feed.feed_url) %></span></a>
+                                <a href="<%= subscription.feed.site_url %>" class="extra-muted"><span><%= short_url(subscription.feed.site_url) %></span></a>
                             </td>
                         </tr>
                         <% end %>
+                        <tr>
+                            <td>
+                                <% if subscription.feed.twitter_feed? %>
+                                    Source
+                                <% else %>
+                                    Feed
+                                <% end %>
+                            </td>
+                            <td>
+                                <a href="<%= subscription.feed.feed_url %>" class="extra-muted"><span><%= short_url(subscription.feed.feed_url) %></span></a>
+                            </td>
+                        </tr>
                     </tbody>
                 </table>
             </div>

@@ -17,7 +17,7 @@
     <%= render partial: 'shared/svg' %>
     <%= render partial: 'shared/notification' %>
     <div class="loading-app">
-        <%= svg_tag "logo", size: "120x120" %>
+        <%= svg_tag "logo", inline: true %>
     </div>
     <div class="app-wrap fade">
         <div class="feeds-column app-panel" data-behavior="content_column" data-resizable-name="feeds" style="<%= user_presenter.feeds_width_style %>">
@@ -43,7 +43,7 @@
                     <button class="back-button" data-behavior="show_feeds">
                         <%= svg_tag "icon-arrow", size: "9x15" %>
                     </button>
-                    <span class="feed-title-wrap"></span>
+                    <span class="feed-title-wrap"><span data-behavior="user_title"></span></span>
                     <button class="search-button" data-behavior="toggle_search"><%= svg_tag "icon-search", size: "16x16" %></button>
                 </div>
                 <div class="search-wrap">
@@ -75,11 +75,6 @@
         <div class="entry-column app-panel" data-behavior="content_column">
             <div class="inner-column">
                 <div class="account-toolbar">
-                    <% if signed_in? && current_user.plan.stripe_id == 'trial' %>
-                        <%= link_to settings_billing_path, class: 'subscribe-promo' do %>
-                            <%= pluralize(current_user.days_left, 'Day') %> Left &mdash; <strong>Subscribe Now</strong>
-                        <% end %>
-                    <% end %>
                     <div class="entry-buttons">
                         <%= render partial: 'shared/app_settings' %>
                     </div>
@@ -95,6 +90,20 @@
                 </div>
                 <div class="entry-meta" data-behavior="entry_meta_target"></div>
                 <div class="entry-content-wrap <%= user_presenter.content_classes %>" data-font-size="<%= user_presenter.font_size %>"  data-font="<%= user_presenter.font %>" data-behavior="entry_content_target">
+                        <div class="splash">
+                            <div class="splash-inner">
+                                <%= svg_tag "logo", inline: true %>
+                                <% if signed_in? && current_user.plan.stripe_id == 'trial' %>
+                                <div class="trial-time">
+                                    <div class="remaining-time"><%= pluralize(current_user.days_left, 'day') %> left</div>
+                                    <%= link_to settings_billing_path, class: 'button' do %>
+                                        Subscribe Now
+                                    <% end %>
+                                </div>
+                                <% end %>
+                            </div>
+                        </div>
+
                     <div data-behavior="inner_content_target"></div>
                 </div>
                 <div class="bottom-toolbar entry-bottom-toolbar">
@@ -123,8 +132,9 @@
     <%= render partial: "shared/modals/search" %>
     <%= render partial: "shared/readability_loading" %>
     <%= render partial: "shared/saved_searches_count" %>
-    <%= render partial: 'shared/format' %>
-
+    <%= render partial: "shared/format" %>
+    <%= render partial: "shared/link_actions" %>
+    
     <%= form_tag(cache_extracts_path, method: :get, class: 'hide', remote: true, data: {behavior: 'extract_cache_form'}) do %>
         <%= hidden_field_tag 'url', nil %>
     <% end %>
@@ -134,4 +144,18 @@
     <script>
         <%= render partial: 'shared/message_flash', locals: {flash: flash} %>
     </script>
+    <% if @entries.present? %>
+    <script>
+        $(function() {
+            feedbin.selectedEntry = {
+              id: <%= @entries.first.first %>,
+              feed_id: <%= @entries.first.last[:feed_id] %>,
+              container: null
+            }
+            $.extend(feedbin.entries, <%= @entries.to_json.html_safe %>);
+            feedbin.showEntry(<%= params[:id] %>);
+            $('[data-behavior~=toggle_full_screen]').click()
+        })
+    </script>
+    <% end %>
 <% end %>

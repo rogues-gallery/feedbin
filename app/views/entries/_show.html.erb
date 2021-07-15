@@ -4,10 +4,10 @@
         <div class="entry-toolbar">
             <div class="site-info">
                 <button class="back-button" data-behavior="show_entries">
-                    <%= svg_tag "icon-arrow", size: "9x15" %>
+                    <%= svg_tag "icon-arrow" %>
                 </button>
                 <button class="entry-button button-full-screen" data-behavior="full_screen" title="Exit full screen" data-toggle="tooltip">
-                    <%= svg_tag "icon-full-screen-close-small", size: "16x16" %>
+                    <%= svg_tag "icon-close" %>
                 </button>
                 <%= entry_presenter.feed_wrapper(subscriptions) do %>
                     <%= entry_presenter.favicon(entry.feed, entry) %>
@@ -16,7 +16,7 @@
             </div>
             <div class="entry-buttons">
                 <%= render partial: "entries/delete_button", locals: {entry: entry} %>
-                <%= render partial: "sharing_services/sharing_service_button", locals: {services: services} %>
+                <%= render partial: "sharing_services/sharing_service_button" %>
                 <%= render partial: "entries/toggle_content", locals: {extract: extract, entry: entry} %>
                 <%= render partial: "starred_entries/form", locals: {entry: entry} %>
                 <%= render partial: "unread_entries/form", locals: {entry: entry} %>
@@ -25,10 +25,13 @@
             </div>
         </div>
     <% end %>
-    <div class="hide" data-behavior="feed_link_template">
-        <%= render partial: "shared/link_actions", locals: {entry: entry} %>
-    </div>
     <script>
-        feedbin.faviconColors($(".entry-toolbar"))
+        try {
+            feedbin.selectedEntryData = <%= raw json_escape({id: entry.id, url: entry.fully_qualified_url, title: entry.title, feed_id: entry.feed_id, feed_title: entry.feed.title, twitter_id: entry.twitter_id || ""}.to_json) %>;
+            feedbin.prepareShareMenu(feedbin.selectedEntryData);
+            feedbin.faviconColors($(".entry-toolbar"));
+        } catch (e) {
+            console.log(e);
+        }
     </script>
 <% end %>
